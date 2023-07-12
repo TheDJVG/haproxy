@@ -1965,6 +1965,36 @@ static int hlua_set_map(lua_State *L)
 	return 0;
 }
 
+/* This function is an LUA binding. It provides a function
+ * for dumping map pattern and sample from a referenced map
+ * file as Lua table.
+ */
+__LJMP static int hlua_dump_map(struct lua_State *L)
+{
+	const char *name;
+	struct pat_ref *ref;
+	struct pat_ref_elt *elt;
+
+	MAY_LJMP(check_args(L, 1, "dump"));
+
+	name = MAY_LJMP(luaL_checkstring(L, 1));
+
+	ref = pat_ref_lookup(name);
+	if (!ref)
+		WILL_LJMP(luaL_error(L, "'dump_map': unknown map file '%s'", name));
+
+	lua_newtable(L);
+	HA_SPIN_LOCK(PATREF_LOCK, &ref->lock);
+	list_for_each_entry(elt, &ref->head, list) {
+		lua_pushstring(L, elt->pattern); // FIXME: Not sure how to detect the actual datatype, might have to use lua_pushnumber(?).
+		lua_pushstring(L, elt->sample);
+		lua_settable(L, -3);
+	}
+	HA_SPIN_UNLOCK(PATREF_LOCK, &ref->lock);
+
+	return 1;
+}
+
 /* This function disables the sending of email through the
  * legacy email sending function which is implemented using
  * checks.
@@ -13202,6 +13232,7 @@ lua_State *hlua_init_state(int thread_num)
 	hlua_class_function(L, "del_acl", hlua_del_acl);
 	hlua_class_function(L, "set_map", hlua_set_map);
 	hlua_class_function(L, "del_map", hlua_del_map);
+	hlua_class_function(L, "dump_map", hlua_dump_map);
 	hlua_class_function(L, "tcp", hlua_socket_new);
 	hlua_class_function(L, "httpclient", hlua_httpclient_new);
 	hlua_class_function(L, "event_sub", hlua_event_global_sub);
