@@ -68,6 +68,9 @@
 #include <haproxy/event_hdl.h>
 #include <haproxy/check.h>
 #include <haproxy/mailers.h>
+#include <haproxy/listener.h>
+#include <haproxy/frontend.h>
+#include <haproxy/protocol.h>
 
 /* Lua uses longjmp to perform yield or throwing errors. This
  * macro is used only for identifying the function that can
@@ -3263,6 +3266,45 @@ __LJMP static int hlua_socket_settimeout(struct lua_State *L)
 	xref_unlock(&socket->xref, peer);
 
 	lua_pushinteger(L, 1);
+	return 1;
+}
+
+/* EXPERIMENTAL PROXY FROM LUA!!! DO NOT USE
+This does not actually configure anything from Lua but just creates a proxy from a Lua call.
+*/
+__LJMP static int hlua_add_proxy(lua_State *L) {
+
+	static struct proxy *luaproxy = NULL;
+	struct bind_conf *bind_conf;
+	char *errmsg = NULL;
+	char *listen = "*:8888";
+	char *whoami = "proxy-from-lua";
+	struct listener *l;
+
+	luaproxy = alloc_new_proxy("Proxy from Lua :-)", PR_CAP_LISTEN | PR_CAP_LB, &errmsg);
+	luaproxy->mode = PR_MODE_HTTP;
+	luaproxy->flags = PR_FL_READY; // Just mark it as ready. Who are we kidding?
+	luaproxy->maxconn = 1337;
+	luaproxy->timeout.client = 10;
+	luaproxy->conf.file = whoami;
+	luaproxy->conf.line = 0;
+	luaproxy->accept = frontend_accept;
+
+	// Create a new bind config for this proxy.
+	bind_conf = bind_conf_alloc(luaproxy, whoami, 0, "", xprt_get(XPRT_RAW));
+	str2listener(listen, luaproxy, bind_conf, whoami, 0, &errmsg);
+	list_for_each_entry(l, &bind_conf->listeners, by_bind) {
+		/* Set default global rights and owner for unix bind  */
+		global.maxsock++;
+	}
+
+	// Add the new proxy to the list.
+	luaproxy->next = proxies_list;
+	proxies_list = luaproxy;
+
+	// Start the listeners !! VERY DIRTY !!
+	check_config_validity();
+	protocol_bind_all(1);
 	return 1;
 }
 
@@ -13203,6 +13245,7 @@ lua_State *hlua_init_state(int thread_num)
 	hlua_class_function(L, "set_map", hlua_set_map);
 	hlua_class_function(L, "del_map", hlua_del_map);
 	hlua_class_function(L, "tcp", hlua_socket_new);
+	hlua_class_function(L, "add_proxy", hlua_add_proxy);
 	hlua_class_function(L, "httpclient", hlua_httpclient_new);
 	hlua_class_function(L, "event_sub", hlua_event_global_sub);
 	hlua_class_function(L, "log", hlua_log);
